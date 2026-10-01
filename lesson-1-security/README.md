@@ -5,6 +5,16 @@ Make the Personal Finance API safe to expose to the internet. We walk the API
 Postman before fixing it. Work the parts in order — each builds on the Alice/Bob
 setup from Part 0.
 
+## Part A — Study & Check (do this first)
+
+Before any Postman work, read and pass the knowledge check:
+
+1. **Read:** `Backend-Engineers-Guide/notes/08_security/01_auth.md` (authentication vs authorization — the foundation for Parts 1–3). Skim `03_security_vulnerabilities.md` and `04_security_best_practices_and_measures.md`.
+2. **Pass the MCQs** your teacher gives you on that reading (aim 4/5).
+3. Only then start Part 0 below.
+
+This is the fixed shape of every lesson: **study a guide section → MCQ check → break-and-fix practical.**
+
 | Part | What you break | What you learn to fix | OWASP |
 | --- | --- | --- | --- |
 | [Part 0 — Setup](./part-0-setup.html) | *(no exploit)* | Run the API; build a Postman attack bench with two users | — |

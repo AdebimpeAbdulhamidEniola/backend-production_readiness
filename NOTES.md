@@ -7,6 +7,9 @@
   the learner has seen the loophole exploited or the failure happen.
 - Ground claims in cited sources (OWASP, Backend-Engineers-Guide, official
   docs). Avoid unsourced assertions.
+- **Study-first flow (required):** each lesson begins by assigning a specific
+  reading from the Backend-Engineers-Guide, then an MCQ check on that reading.
+  Only after the learner passes the MCQs do we move to the break/fix practical.
 
 ## Repo facts (so we don't re-derive each session)
 - `personal_finance_api` clone is READ-ONLY here
