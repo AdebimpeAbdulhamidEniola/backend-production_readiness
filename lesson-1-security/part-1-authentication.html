@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Part 1 — Forging a Login Token</title>
+<meta name="description" content="Exploit the default_secret JWT fallback to impersonate any user, then harden token signing. OWASP API2 Broken Authentication.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 1 · Security · Part 1</p>
+  <h1>Forging a login token</h1>
+  <p class="sub">You'll mint a valid session for a user whose password you never knew — by abusing a secret the code hands out for free.</p>
+</header>
+
+<p>
+  <span class="badge sev">Severity: Critical</span>
+  <span class="badge owasp">OWASP API2:2023 — Broken Authentication</span>
+</p>
+
+<p>A JWT is only as trustworthy as the secret it's signed with. If an attacker can guess or obtain that secret, they can sign a token that says "I am user X" and your server will believe it. Let's see where your code gives the secret away.</p>
+
+<h2>Where the hole is</h2>
+<p>Open <code>src/utils/auth.utils.ts</code>:</p>
+<pre><code>const JWT_SECRET = process.env.JWT_SECRET || "default_secret";
+//                                          &uarr; if the env var is missing,
+//                                            the signing key becomes a public string
+export const generateToken = (id, email, name) =&gt;
+  jwt.sign({ id, email, name }, JWT_SECRET, options);</code></pre>
+<p>Two problems compound here:</p>
+<ol class="steps">
+  <li>If <code>JWT_SECRET</code> is ever unset (a forgotten env var in a new deploy, CI, or a teammate's machine), the key silently becomes the literal string <code>"default_secret"</code>.</li>
+  <li>Your repo is public, so that fallback is <em>known to the whole internet</em>. There is nothing to guess.</li>
+</ol>
+<p>The guide warns about exactly this: tokens must use "weak or predictable" secrets as a red flag (<code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code>; see also <code>projects/security_controls_lab</code>'s JWT demo on signing and verification).</p>
+
+<div class="callout break">
+  <h3>The claim we're about to prove</h3>
+  <p>If the server runs without <code>JWT_SECRET</code> set, anyone can craft a token for <strong>any user id</strong> and call protected endpoints as that user — full account takeover, no password required.</p>
+</div>
+
+<h2>Break it — forge a token</h2>
+<p>We simulate the misconfiguration (an unset secret) so you can see the consequence safely on your own machine.</p>
+<ol class="steps">
+  <li><strong>Reproduce the misconfig.</strong> Stop the server. Comment out / remove <code>JWT_SECRET</code> from <code>.env</code>. Restart <code>npm run dev</code>. The app still boots happily — that silence is the danger.</li>
+  <li><strong>Find a victim's id.</strong> In a real breach the attacker gets this from any endpoint that leaks an id (a public profile, a shared document, an error). Locally, grab Alice's id:
+    <pre><code>psql "$DATABASE_URL" -c 'SELECT id, email FROM "User";'</code></pre>
+  </li>
+  <li><strong>Mint the token.</strong> Go to <a href="https://jwt.io">jwt.io</a> (Debugger). Set:
+    <pre><code>Header   { "alg": "HS256", "typ": "JWT" }
+Payload  { "id": "ALICE_ID", "email": "alice@test.com", "name": "Alice" }
+Verify signature:  secret = default_secret   (HMACSHA256)</code></pre>
+    Copy the encoded token on the left. You just signed a session as Alice. You never knew her password.
+  </li>
+  <li><strong>🔴 Use it.</strong> In Postman: <code>GET {{baseUrl}}/api/user/profile</code> with header <code>Authorization: Bearer &lt;forged token&gt;</code>.
+    <div class="callout break" style="margin:.8rem 0 0">You get <code>200</code> and Alice's full profile. The server verified the forged token against <code>default_secret</code> and accepted it. Every transaction, report, and AI endpoint is now yours-as-Alice.</div>
+  </li>
+</ol>
+
+<h2>Fix it — refuse to run without a real secret</h2>
+<p>The principle: a missing signing secret is not a thing to paper over with a default — it's a <strong>fatal misconfiguration</strong>. Fail loudly at startup instead of silently trusting a public string.</p>
+
+<h3>1. Remove the fallback; validate on boot</h3>
+<p><code>src/utils/auth.utils.ts</code>:</p>
+<pre><code>const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length &lt; 32) {
+  throw new Error(
+    "JWT_SECRET is missing or too weak. Set a 32+ char random secret."
+  );
+}</code></pre>
+<p>Now the app <em>cannot start</em> misconfigured. A crash on deploy is a page you answer; a silent <code>default_secret</code> is a breach you find out about from your users.</p>
+
+<h3>2. Generate a real secret</h3>
+<pre><code>node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"</code></pre>
+<p>Put that in <code>.env</code> as <code>JWT_SECRET</code>, and a different one per environment. Never commit it.</p>
+
+<div class="callout fix">
+  <h3>Re-test</h3>
+  <p>With a real <code>JWT_SECRET</code> set, repeat the forge: the jwt.io token signed with <code>default_secret</code> now fails verification &rarr; <code>401 Invalid or expired token</code>. And if you unset the secret again, the server refuses to boot at all. Both doors are shut.</p>
+</div>
+
+<h2>Lock it so it can't come back</h2>
+<pre><code>// Startup test: app must throw when JWT_SECRET is unset
+// 1. delete process.env.JWT_SECRET
+// 2. importing/initialising auth.utils should throw
+// A forged token signed with "default_secret" must verify -&gt; 401</code></pre>
+<p class="muted">Bonus hardening to discuss with me: short token lifetimes, rotating secrets, and why <code>{"alg":"none"}</code> tokens must always be rejected (they are, by this library — but know why).</p>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">Your forged Alice token unlocks more than her profile. With <code>default_secret</code> still in place, use it against an AI endpoint and explain the <em>extra</em> damage beyond data theft.</p>
+  <p class="muted">Hint: think about who pays for an LLM call.</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <p><code>GET {{baseUrl}}/api/ai/insights</code> with <code>Authorization: Bearer &lt;forged token&gt;</code> returns AI-generated insights over Alice's finances — and every call runs a paid model request billed to the project's OpenAI/Vertex account. So a forged token is not just <em>read Alice's data</em>; it's <em>spend the company's AI budget without limit</em> and expose her private financial analysis. Token forgery turns into both a data breach and a cost-of-service attack. Setting a real <code>JWT_SECRET</code> makes the forged token fail verification &rarr; <code>401</code>, closing all of it at once.</p>
+  </details>
+</div>
+
+<div class="quiz">
+  <p class="q">Why is <code>process.env.JWT_SECRET || "default_secret"</code> dangerous even though the app "works"?</p>
+  <button data-correct="false">Because "default_secret" is too long to hash quickly</button>
+  <button data-correct="true">A missing env var silently makes the signing key public knowledge</button>
+  <button data-correct="false">Because JWTs cannot be signed with HMAC secrets</button>
+  <button data-correct="false">Because it forces every token to expire immediately</button>
+  <p class="feedback"
+     data-right="Exactly. The fallback turns a config mistake into a known-key situation, and anyone can then sign tokens for any user. Fail fast instead."
+     data-wrong="Not the issue. The danger is that the fallback is a predictable, public string — so forged tokens verify. Removing the fallback and failing on boot is the fix."></p>
+</div>
+
+<h2>Primary source</h2>
+<p><a href="https://owasp.org/API-Security/editions/2023/en/0xa2-broken-authentication/"><strong>OWASP API2:2023 — Broken Authentication</strong></a> (see "Uses weak encryption keys" and "weak or predictable tokens"). Mental model: <code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code>.</p>
+
+<div class="ask">
+  <strong>Ask me anything.</strong> Want to see why the <code>alg:none</code> attack fails here, how refresh tokens change this, or how to load secrets from a vault instead of <code>.env</code>? Ask in the chat.
+</div>
+
+<nav class="lesson-nav">
+  <span>← Part 0: Setup</span>
+  <span>Next → Part 2: deleting a stranger's transactions</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

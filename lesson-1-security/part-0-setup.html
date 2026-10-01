@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Part 0 — Setup & Your Attack Bench</title>
+<meta name="description" content="Get the Personal Finance API running locally and build the Postman environment you will attack from in every security part.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 1 · Security · Part 0</p>
+  <h1>Setting up your attack bench</h1>
+  <p class="sub">Before you can break anything, you need the API running and a Postman workspace that moves fast. You'll reuse this in every security part.</p>
+</header>
+
+<p>This part has no vulnerability — it's the foundation. By the end you'll have the server up, a database behind it, and two users (<strong>Alice</strong> and <strong>Bob</strong>) you can switch between with one click. Every later part is "log in as Bob, attack Alice."</p>
+
+<h2>1. Run the API</h2>
+<ol class="steps">
+  <li>In your local clone: <code>npm install</code>.</li>
+  <li>Create <code>.env</code> (see <code>README.md</code> for the full list). At minimum you need <code>DATABASE_URL</code>, <code>PORT</code>, <code>JWT_SECRET</code>, <code>JWT_EXPIRES_IN</code>.</li>
+  <li>Set up the database schema: <code>npx prisma migrate dev</code> then <code>npx prisma generate</code>.</li>
+  <li>Start it: <code>npm run dev</code>. You should see <code>Server is running at http://localhost:PORT</code>.</li>
+</ol>
+<div class="callout">
+  <strong>Note what it prints.</strong> On boot the server also logs your database URL to the console. Keep that in the corner of your eye — it's a real finding we exploit in <a href="part-5-misconfiguration.html">Part 5</a>.
+</div>
+
+<h2>2. Build the Postman environment</h2>
+<p>In Postman, create an <em>Environment</em> called <code>FinAI local</code> with these variables:</p>
+<pre><code>baseUrl   = http://localhost:4100     (match your PORT)
+TOKEN_A   =                            (Alice's JWT, filled after login)
+TOKEN_B   =                            (Bob's JWT)
+TX_ID     =                            (an id we capture mid-flow)</code></pre>
+<p>Using variables instead of pasted values is what lets you re-run the same request before and after a fix and see only the behaviour change.</p>
+
+<h2>3. Create two users (the "from login" starting point)</h2>
+<ol class="steps">
+  <li><strong>Sign up Alice.</strong> <code>POST {{baseUrl}}/api/auth/signup</code>, body:
+    <pre><code>{ "email": "alice@test.com", "password": "password123",
+  "confirmPassword": "password123", "name": "Alice" }</code></pre>
+    Expect <code>201</code> and "Please check your email to verify your account."
+  </li>
+  <li><strong>Sign up Bob</strong> — same request, <code>bob@test.com</code>, <code>"name": "Bob"</code>.</li>
+  <li><strong>Verify both.</strong> Login is blocked until <code>isVerified</code> is true, and SendGrid won't deliver on localhost without keys. For local testing, flip the flag directly:
+    <pre><code>psql "$DATABASE_URL" -c 'UPDATE "User" SET "isVerified" = true;'</code></pre>
+    <span class="muted">This is a local shortcut only. In <a href="part-1-authentication.html">Part 1</a> you'll see the real verification-token flow and why it matters.</span>
+  </li>
+  <li><strong>Log in Alice.</strong> <code>POST {{baseUrl}}/api/auth/login</code>, body <code>{ "email": "alice@test.com", "password": "password123" }</code>. In the response, <code>data.token</code> is Alice's JWT — paste it into the <code>TOKEN_A</code> environment variable.</li>
+  <li><strong>Log in Bob</strong> &rarr; paste into <code>TOKEN_B</code>.</li>
+</ol>
+
+<div class="callout fix">
+  <h3>Make switching users one click</h3>
+  <p>On your transaction/report requests, set the Authorization header to <code>Bearer {{TOKEN_A}}</code>. To "become Bob," change that one word to <code>{{TOKEN_B}}</code>. That's the core move of every attack in this lesson.</p>
+</div>
+
+<h2>4. Smoke-test the happy path</h2>
+<p>Confirm a normal, legitimate flow works before you try to break it — otherwise you won't know whether a later failure is the bug or your setup:</p>
+<pre><code>POST {{baseUrl}}/api/transactions   Authorization: Bearer {{TOKEN_A}}
+{ "amount": 5000, "category": "Salary", "type": "INCOME" }
+&rarr; 201, copy data.id into TX_ID
+
+GET  {{baseUrl}}/api/transactions    Authorization: Bearer {{TOKEN_A}}
+&rarr; 200, you see the transaction you just made</code></pre>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">Add a third user, Carol, entirely on your own, and prove she can use the API — no step-by-step this time.</p>
+  <p class="muted">You have everything you need from the walkthrough above. Give it a real try before you reveal the answer.</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <ol class="steps">
+      <li><code>POST {{baseUrl}}/api/auth/signup</code> with <code>carol@test.com</code> / <code>"name": "Carol"</code>.</li>
+      <li>Verify her: <code>psql "$DATABASE_URL" -c 'UPDATE "User" SET "isVerified" = true WHERE email = '"'"'carol@test.com'"'"';'</code></li>
+      <li><code>POST {{baseUrl}}/api/auth/login</code> as Carol &rarr; paste <code>data.token</code> into a new <code>TOKEN_C</code> variable.</li>
+      <li><code>POST {{baseUrl}}/api/transactions</code> with <code>Bearer {{TOKEN_C}}</code> &rarr; 201. Then <code>GET</code> the same route &rarr; you see only Carol's transaction, not Alice's or Bob's. That isolation is what Part 2 is about.</li>
+    </ol>
+  </details>
+</div>
+
+<div class="quiz">
+  <p class="q">Why do we store the JWT in a Postman environment variable instead of pasting it into each request?</p>
+  <button data-correct="false">Environment variables encrypt the token in transit</button>
+  <button data-correct="true">So we can swap one user for another and re-run requests unchanged</button>
+  <button data-correct="false">Because Postman cannot send a raw Bearer token otherwise</button>
+  <button data-correct="false">To make the token last longer than its expiry</button>
+  <p class="feedback"
+     data-right="Right. Changing one variable 'becomes' another user, and re-running the exact same request is how we isolate the behaviour change a fix makes."
+     data-wrong="Not that — variables don't change security, they change workflow. The point is clean, repeatable user-switching."></p>
+</div>
+
+<div class="ask">
+  <strong>Ask me anything.</strong> Can't get Prisma to migrate, unsure what to put in <code>.env</code>, or Postman login returns 401? Tell me the exact response you got and I'll unblock you.
+</div>
+
+<nav class="lesson-nav">
+  <span>Lesson 1 · Security</span>
+  <span>Next → Part 1: forging a login token</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

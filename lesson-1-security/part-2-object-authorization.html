@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Part 2 — Deleting a Stranger's Transactions</title>
+<meta name="description" content="Break and fix Broken Object Level Authorization (OWASP API1) in the transaction endpoints, proven in Postman.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 1 · Security · Part 2</p>
+  <h1>Deleting a stranger's transactions</h1>
+  <p class="sub">Log in as Bob and destroy Alice's financial records — using nothing but a valid Bob token. Then make that attack impossible.</p>
+</header>
+
+<p>
+  <span class="badge sev">Severity: High</span>
+  <span class="badge owasp">OWASP API1:2023 — BOLA</span>
+</p>
+
+<p>In <a href="part-1-authentication.html">Part 1</a> you proved the server can be tricked about <em>who</em> you are. Now we attack the next layer: even as your honest self, the API lets you touch objects that aren't yours. Every endpoint that takes an <strong>ID from the client</strong> must check the logged-in user is allowed to touch that object. Your transaction endpoints don't — the <a href="https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/">#1 risk on the OWASP API Top 10</a>.</p>
+
+<div class="callout break">
+  <h3>The claim we're about to prove</h3>
+  <p>Any authenticated user can read the ID of another user's transaction and then update or delete it, because the code looks the row up by <code>id</code> alone and never compares it to <code>req.userId</code>.</p>
+</div>
+
+<h2>Where the hole is</h2>
+<p><code>src/models/transaction.model.ts</code>:</p>
+<pre><code>export const deleteTransaction = async (id: string) =&gt; {
+    return await prisma.transaction.delete({
+        where: { id }            // &larr; only the id. whose transaction? nobody asks.
+    })
+}</code></pre>
+<p>And <code>src/controllers/transaction.controller.ts</code> checks you're logged in, then throws the user id away:</p>
+<pre><code>const userId = req.userId;
+if (!userId) throw new AppError("User not authenticated", 401);
+const transaction = await deleteTransaction(req.params.id); // userId never used</code></pre>
+<p>Being logged in is <strong>authentication</strong>. Being allowed to touch <em>this row</em> is <strong>authorization</strong>. The code does the first and skips the second (<code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code>).</p>
+
+<h2>Break it — in Postman</h2>
+<p class="muted">Uses the Alice/Bob setup and <code>TOKEN_A</code>/<code>TOKEN_B</code> from <a href="part-0-setup.html">Part 0</a>.</p>
+<ol class="steps">
+  <li><strong>Alice records a transaction.</strong> <code>POST {{baseUrl}}/api/transactions</code>, <code>Authorization: Bearer {{TOKEN_A}}</code>, body <code>{ "amount": 5000, "category": "Salary", "type": "INCOME" }</code>. Copy <code>data.id</code> &rarr; <code>TX_ID</code>. This row is Alice's.</li>
+  <li><strong>🔴 The attack.</strong> Become Bob: <code>DELETE {{baseUrl}}/api/transactions/{{TX_ID}}</code>, <code>Authorization: Bearer {{TOKEN_B}}</code>.
+    <div class="callout break" style="margin:.8rem 0 0">You get <code>200 "Transaction deleted successfully"</code>. Bob deleted Alice's data with his own token. Try <code>PUT {{baseUrl}}/api/transactions/{{TX_ID}}</code> with <code>{ "amount": 1 }</code> and Bob's token — Bob can rewrite Alice's money too.</div>
+  </li>
+  <li><strong>Confirm the damage.</strong> As Alice, <code>GET {{baseUrl}}/api/transactions</code> — her transaction is gone. She never consented.</li>
+</ol>
+<p>No special tools — just an ID Bob wasn't supposed to use. This is how real breaches pull thousands of other users' records.</p>
+
+<h2>Fix it — scope every object to its owner</h2>
+<p>In every function that uses a client-supplied input to reach a record, check the logged-in user owns it. We push the user's id into the query so the database can only ever touch their rows.</p>
+<h3>1. Make the model owner-aware</h3>
+<pre><code>export const updateTransaction = async (
+  id: string, userId: string, data: Partial&lt;TransactionInput&gt;
+) =&gt; {
+  const result = await prisma.transaction.updateMany({
+    where: { id, userId },   // &larr; must match the owner too
+    data,
+  });
+  return result.count;       // 0 = not yours (or not found)
+};
+
+export const deleteTransaction = async (id: string, userId: string) =&gt; {
+  const result = await prisma.transaction.deleteMany({ where: { id, userId } });
+  return result.count;
+};</code></pre>
+<h3>2. Make the controller enforce it</h3>
+<pre><code>const count = await deleteTransaction(req.params.id, userId);
+if (count === 0) throw new AppError("Transaction not found", 404);
+handleResponse(res, 200, "Transaction deleted successfully");</code></pre>
+<p>Do the same in <code>updateTransacctionController</code>. Return <strong>404, not 403</strong>: a 403 would confirm the row exists and leak that another user has it. 404 reveals nothing.</p>
+
+<div class="callout fix">
+  <h3>Re-test — same requests, new outcome</h3>
+  <p>Bob's DELETE on Alice's <code>{{TX_ID}}</code> &rarr; <code>404 "Transaction not found"</code>. Then delete it as Alice &rarr; <code>200</code>. Owners can act; strangers can't.</p>
+</div>
+
+<h2>Lock it so it can't come back</h2>
+<pre><code>// Bob must NOT delete Alice's transaction
+// DELETE /api/transactions/:aliceTxId  with Bob's token -&gt; 404
+// and Alice's transaction still exists</code></pre>
+<p class="muted">We turn this into a runnable test in <a href="../lesson-4-testing-and-cicd/README.md">Lesson 4</a>, and CI runs it on every push.</p>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">We proved the <strong>delete</strong> path. Prove the <strong>update</strong> path has the exact same hole — Bob rewriting Alice's data — then confirm your fix closes both.</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <ol class="steps">
+      <li>As Alice, create a transaction; copy its id into <code>{{TX_ID}}</code>.</li>
+      <li>As Bob: <code>PUT {{baseUrl}}/api/transactions/{{TX_ID}}</code>, <code>Bearer {{TOKEN_B}}</code>, body <code>{ "category": "Hacked", "amount": 1 }</code> &rarr; <code>200</code>. Bob just overwrote Alice's record.</li>
+      <li>Apply the same fix to <code>updateTransaction</code> (use <code>updateMany</code> with <code>where: { id, userId }</code>; controller throws 404 when <code>count === 0</code>).</li>
+      <li>Re-run Bob's PUT &rarr; <code>404</code>. Run the same PUT as Alice &rarr; <code>200</code>. Both the delete and update paths are now owner-scoped.</li>
+    </ol>
+  </details>
+</div>
+
+<div class="quiz">
+  <p class="q">An endpoint reads a <code>transactionId</code> from the URL, confirms a valid login token, then deletes that transaction. What is still missing?</p>
+  <button data-correct="false">It must re-hash the user's password first</button>
+  <button data-correct="true">It must confirm the token's user owns that transaction</button>
+  <button data-correct="false">It must encrypt the transaction id inside the token</button>
+  <button data-correct="false">It must refresh the token before deleting</button>
+  <p class="feedback"
+     data-right="Correct. Authentication (who you are) is not authorization (what this object lets you do). The owner check is the missing half."
+     data-wrong="Not quite — the token already proves identity. What's unproven is whether that identity may touch THIS object."></p>
+</div>
+
+<h2>Primary source</h2>
+<p><a href="https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/"><strong>OWASP API1:2023 — Broken Object Level Authorization</strong></a>.</p>
+
+<div class="ask">
+  <strong>Ask me anything.</strong> Want the same bug hunted in the profile or AI endpoints, or why we used <code>deleteMany</code> instead of <code>findFirst</code>-then-<code>delete</code>? Ask in the chat.
+</div>
+
+<nav class="lesson-nav">
+  <span>← Part 1: Forging a token</span>
+  <span>Next → Part 3: the unguarded reports</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Part 5 — Leaking Secrets & Misconfiguration</title>
+<meta name="description" content="Find the database URL printed to logs, wide-open CORS, and other misconfigurations, then lock them down. OWASP API8.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 1 · Security · Part 5</p>
+  <h1>Secrets in the logs, doors left open</h1>
+  <p class="sub">The last security pass: the quiet misconfigurations that don't show up as a failed request but hand an attacker the keys — starting with the line your server prints every time it boots.</p>
+</header>
+
+<p>
+  <span class="badge sev">Severity: Medium–High</span>
+  <span class="badge owasp">OWASP API8:2023 — Security Misconfiguration</span>
+</p>
+
+<p>Most of this lesson attacked endpoints. Misconfiguration is different: the damage is in defaults, logs, and settings. It's also the easiest category to <em>find</em> once you know to look — and interviewers love candidates who read boot logs and config, not just routes.</p>
+
+<h2>Finding 1 — the database URL in your logs</h2>
+<p><code>src/index.ts</code> prints your connection string on every startup:</p>
+<pre><code>app.listen(port, () =&gt; {
+  console.log(`Server is running at http://localhost:${port}`);
+  console.log(process.env.DB_URL)   // &larr; your full database URL, creds and all
+});</code></pre>
+<div class="callout break">
+  <h3>Prove it</h3>
+  <p>Start the server and look at the terminal: your database URL — including the username and, in many setups, the password and host — is sitting in plain text. Now picture that same line in a cloud log aggregator (CloudWatch, Datadog, Logtail) that half your company and every integration can read. Logs get shipped, searched, and retained for years. A DB credential in a log is a DB credential leaked.</p>
+</div>
+<h3>Fix</h3>
+<pre><code>app.listen(port, () =&gt; {
+  console.log(`Server listening on port ${port}`);   // no secrets, no internal URLs
+});</code></pre>
+<p>Rule: <strong>never log secrets or connection strings.</strong> Log the <em>fact</em> of a connection ("database connected"), never its credentials. And rotate that DB password now — assume anything that reached a log is compromised.</p>
+
+<h2>Finding 2 — CORS is open to the entire internet</h2>
+<p><code>src/config/app.config.ts</code> uses <code>cors()</code> with no options:</p>
+<pre><code>app.use(cors());   // &larr; Access-Control-Allow-Origin: *  (any website can call your API)</code></pre>
+<p>That lets a script on <em>any</em> origin make browser requests to your API. For a credentialed finance API, you want an allow-list:</p>
+<pre><code>app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(",") ?? [],  // only your frontends
+  credentials: true,
+}));</code></pre>
+
+<h2>Finding 3 — do the small hardening the code half-started</h2>
+<p>Credit where due: the app already sets <code>app.disable('x-powered-by')</code> (hides the Express fingerprint) and only mounts Morgan logging outside production. Finish the set:</p>
+<ul>
+  <li>Add <a href="https://helmetjs.github.io/"><code>helmet()</code></a> for safe default security headers.</li>
+  <li>Add <code>express.json({ limit: "10kb" })</code> so a giant JSON body can't exhaust memory (ties back to Part 4's resource-consumption theme).</li>
+  <li>Make sure your production error path never returns stack traces — your <code>handleUnexpectedError</code> already returns a generic message, which is correct; keep it that way.</li>
+  <li>Confirm <code>.env</code> and <code>serviceaccount.json</code> are git-ignored (they are) — a leaked key file is game over.</li>
+</ul>
+
+<div class="callout fix">
+  <h3>Re-check</h3>
+  <p>Restart: the boot log shows a port and nothing secret. From a browser console on some random site, a <code>fetch</code> to your API is now blocked by CORS. Response headers show Helmet's protections and no <code>X-Powered-By</code>. The quiet doors are shut.</p>
+</div>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">There's a second secrets-in-logs risk hiding in the auth flow, not the boot line. Find a place where a token or credential could end up in a log or an error, and propose the fix.</p>
+  <p class="muted">Hint: look at what gets <code>console.error</code>'d or returned when something fails.</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <p>Two good catches: (1) In <code>signUp</code>, a failed email send does <code>console.error("Email sending failed...", emailError)</code> — provider errors can include the recipient address and sometimes API keys in their payload, so log a sanitized message, not the raw error object. (2) The email <strong>verification token</strong> is a real credential (whoever has it can verify an account). Make sure it never appears in logs or in a generic error echoed to the client. The general rule from Finding 1 holds everywhere: log <em>events</em>, not <em>secrets</em>. We'll formalise this when we add structured logging in <a href="../lesson-5-observability/README.md">Lesson 5</a>.</p>
+  </details>
+</div>
+
+<div class="quiz">
+  <p class="q">Why is <code>console.log(process.env.DB_URL)</code> on startup a real vulnerability, not just untidy?</p>
+  <button data-correct="false">It slows the server's boot time measurably</button>
+  <button data-correct="true">Logs are shipped, searched and retained, so the credential leaks widely</button>
+  <button data-correct="false">It prevents the database from accepting connections</button>
+  <button data-correct="false">It only matters if the log uses the wrong character encoding</button>
+  <p class="feedback"
+     data-right="Right. A secret printed once lives wherever logs flow — aggregators, backups, screenshots — far beyond the one terminal. Treat it as leaked and rotate it."
+     data-wrong="Not that. The problem is reach: logs are collected and kept, so a credential printed at boot ends up readable by many systems and people over a long time."></p>
+</div>
+
+<h2>Primary source</h2>
+<p><a href="https://owasp.org/API-Security/editions/2023/en/0xa8-security-misconfiguration/"><strong>OWASP API8:2023 — Security Misconfiguration</strong></a>. Guide: <code>Backend-Engineers-Guide/notes/08_security/07_credentials_management.md</code> and <code>04_security_best_practices_and_measures.md</code>.</p>
+
+<div class="ask">
+  <strong>Ask me anything — and congratulations.</strong> You've finished the security lesson: you can now forge-and-fix auth, enforce object and function authorization, throttle abuse, and close misconfigurations. Ask me for the interview-ready summary of all five parts, or say "next lesson" to move on to performance.
+</div>
+
+<nav class="lesson-nav">
+  <span>← Part 4: Rate limiting</span>
+  <span>Lesson 1 complete → Lesson 2: Performance</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

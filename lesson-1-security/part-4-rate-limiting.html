@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Part 4 — Brute-Forcing the Login</title>
+<meta name="description" content="Prove the login endpoint accepts unlimited password guesses, then add rate limiting. OWASP API4 Unrestricted Resource Consumption.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 1 · Security · Part 4</p>
+  <h1>Guessing passwords, unlimited tries</h1>
+  <p class="sub">You'll fire a hundred wrong passwords at the login endpoint and watch it cheerfully accept every attempt. Then you'll shut the door.</p>
+</header>
+
+<p>
+  <span class="badge sev">Severity: High</span>
+  <span class="badge owasp">OWASP API4:2023 — Unrestricted Resource Consumption</span>
+</p>
+
+<p>Validation and hashing protect a <em>single</em> login attempt. Nothing in your API limits the <em>number</em> of attempts. That means an attacker can run a password list against <code>alice@test.com</code> until one works — "credential stuffing," one of the most common ways accounts fall.</p>
+
+<h2>Where the hole is</h2>
+<p><code>src/routes/auth.routes.ts</code> and the login controller do validation, lookup, and <code>comparePassword</code> — all correct — but there is <strong>no counter, no lockout, no delay</strong> across attempts:</p>
+<pre><code>routes.post('/login', validateBody(logInSchema), logIn);
+//            &uarr; nothing here limits how often this can be hit</code></pre>
+<p>The guide lists this failure directly: an API that "permits credential stuffing" and "brute force attack on the same user account" is broken authentication (<code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code>; see the rate-limiter demo in <code>projects/security_controls_lab</code>).</p>
+
+<div class="callout break">
+  <h3>The claim we're about to prove</h3>
+  <p>The login endpoint will process <strong>as many wrong-password attempts as you can send</strong>, as fast as you can send them, with no throttle or lockout — everything an attacker needs to brute-force an account.</p>
+</div>
+
+<h2>Break it — hammer the endpoint</h2>
+<p>Postman's <strong>Collection Runner</strong> turns one request into a loop.</p>
+<ol class="steps">
+  <li>Make a request <code>POST {{baseUrl}}/api/auth/login</code> with body
+    <pre><code>{ "email": "alice@test.com", "password": "{{guess}}" }</code></pre>
+  </li>
+  <li>Add a small CSV data file of guesses (<code>guess</code> column): <code>wrong1, wrong2, &hellip; password123</code> — put the real password last.</li>
+  <li>Run the collection over that file (or set iterations to 100 with a random value).
+    <div class="callout break" style="margin:.8rem 0 0">Every wrong guess returns <code>401</code> instantly, the server never slows down or blocks you, and the final row with the real password returns <code>200</code> + a token. You just brute-forced the account. A real attacker uses a list of millions, not five.</div>
+  </li>
+  <li>Try from the command line too, to feel how fast it is:
+    <pre><code>for i in $(seq 1 50); do
+  curl -s -o /dev/null -w "%{http_code}\n" \
+    -X POST {{baseUrl}}/api/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"email":"alice@test.com","password":"guess'"$i"'"}'
+done</code></pre>
+    Fifty <code>401</code>s, no resistance.
+  </li>
+</ol>
+
+<h2>Fix it — limit attempts</h2>
+<p>Two layers, cheapest first.</p>
+<h3>1. A global limiter, then a strict one on auth</h3>
+<p>Install <code>express-rate-limit</code>. In <code>src/config/app.config.ts</code> add a tight limiter to the auth routes:</p>
+<pre><code>import rateLimit from "express-rate-limit";
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,   // 15 minutes
+  max: 10,                    // 10 attempts per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: "failed", message: "Too many attempts, try again later." },
+});
+
+app.use("/api/auth", authLimiter, authRoutes);  // &larr; limiter before the routes</code></pre>
+<p>Pick limits from a real budget (OWASP API4's "How To Prevent" talks in terms of maximums per client). Ten tries per 15 minutes stops a brute-force while never bothering a human who fat-fingered their password twice.</p>
+<h3>2. Don't help the attacker</h3>
+<p>Your login already returns the same <code>401 "Invalid email or password"</code> whether the email or the password was wrong — good: it doesn't reveal which emails exist. Keep it that way.</p>
+
+<div class="callout fix">
+  <h3>Re-test</h3>
+  <p>Re-run the Collection Runner: the first 10 attempts behave, then every further attempt returns <code>429 "Too many attempts"</code> — <em>including</em> the one carrying the correct password. The attacker is throttled to a rate where a password list would take lifetimes.</p>
+</div>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">A limiter on <code>/api/auth</code> protects login and signup. Name one <em>other</em> endpoint group in this API that urgently needs its own, stricter limit — and say why.</p>
+  <p class="muted">Hint: which endpoints cost real money per call?</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <p>The <strong>AI endpoints</strong> (<code>/api/ai/insights</code>, <code>/api/ai/budget</code>). Each call triggers a paid LLM request, so an authenticated user (or a stolen token from Part 1) hammering them is a direct bill-inflation attack — OWASP API4 again, but measured in dollars, not just CPU. They deserve a much lower <code>max</code> than ordinary reads, and ideally a per-user quota, not just per-IP. Reports and transaction reads are cheaper but still worth a generous global limiter so one client can't starve the database.</p>
+  </details>
+</div>
+
+<div class="quiz">
+  <p class="q">Input validation with Zod is already on the login route. Why doesn't it stop a brute-force attack?</p>
+  <button data-correct="false">Zod only validates GET requests, not POST</button>
+  <button data-correct="true">It checks each request's shape, not how many requests arrive</button>
+  <button data-correct="false">Because the password is hashed before Zod sees it</button>
+  <button data-correct="false">It does stop it; no rate limiter is needed</button>
+  <p class="feedback"
+     data-right="Right. Validation judges one request in isolation. Brute force is about volume over time — a different axis that needs a rate limiter."
+     data-wrong="No — Zod validates the body of every request regardless of method, but it has no memory of previous requests. Stopping volume needs a rate limiter."></p>
+</div>
+
+<h2>Primary source</h2>
+<p><a href="https://owasp.org/API-Security/editions/2023/en/0xa4-unrestricted-resource-consumption/"><strong>OWASP API4:2023 — Unrestricted Resource Consumption</strong></a> and <a href="https://owasp.org/API-Security/editions/2023/en/0xa2-broken-authentication/">API2 — Broken Authentication</a> (credential stuffing).</p>
+
+<div class="ask">
+  <strong>Ask me anything.</strong> Want to add per-user (not just per-IP) limits, a Redis-backed limiter for multi-instance deploys, or account lockout with email alerts? Ask in the chat.
+</div>
+
+<nav class="lesson-nav">
+  <span>← Part 3: Unguarded endpoints</span>
+  <span>Next → Part 5: leaking secrets & misconfiguration</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

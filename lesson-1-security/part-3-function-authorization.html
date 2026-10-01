@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Part 3 — The Unguarded Endpoints</title>
+<meta name="description" content="Find endpoints whose authentication middleware was never wired up: the reports routes. Broken function-level access control.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 1 · Security · Part 3</p>
+  <h1>The endpoints nobody guarded</h1>
+  <p class="sub">You'll test every route from login to the end and discover that a whole group of them was wired up without the auth check. Here it fails shut — but the same mistake is how data leaks.</p>
+</header>
+
+<p>
+  <span class="badge sev">Severity: Medium</span>
+  <span class="badge owasp">OWASP API5:2023 — Broken Function Level Authorization</span>
+</p>
+
+<p>A production security pass means walking <em>every</em> endpoint and asking two questions: "is authentication enforced here?" and "is it enforced the same way as its neighbours?" Inconsistency between routes is where attackers live. Let's audit the router.</p>
+
+<h2>Where the hole is</h2>
+<p>Compare two route files. Transactions (<code>src/routes/transaction.routes.ts</code>) guard every route:</p>
+<pre><code>router.post("/", authenticate, validateBody(...), createTransactionController);
+router.get("/",  authenticate, getTransactionController);</code></pre>
+<p>But reports (<code>src/routes/report.routes.ts</code>) have <strong>no <code>authenticate</code> at all</strong>:</p>
+<pre><code>router.get("/monthly", getMonthlyReport);      // &larr; no authenticate
+router.get("/charts",  getChartsAndGraph);     // &larr; no authenticate</code></pre>
+<p>Yet both controllers do <code>const userId = req.userId;</code> — a value that <em>only</em> the <code>authenticate</code> middleware sets. The middleware isn't on these routes, so <code>req.userId</code> is always <code>undefined</code>.</p>
+
+<div class="callout break">
+  <h3>The claim we're about to prove</h3>
+  <p>The reports endpoints are <strong>broken for everyone</strong>: even a correctly logged-in user is rejected, because the route never runs the middleware that would identify them. The access-control layer was simply forgotten on this router.</p>
+</div>
+
+<h2>Break it — in Postman</h2>
+<ol class="steps">
+  <li><strong>Call it as a valid user.</strong> <code>GET {{baseUrl}}/api/reports/monthly</code>, <code>Authorization: Bearer {{TOKEN_A}}</code>.
+    <div class="callout break" style="margin:.8rem 0 0">You get <code>401 "User not authenticated"</code> — <em>even though your token is valid.</em> The report feature is dead. Alice can create transactions but can never see a report of them.</div>
+  </li>
+  <li><strong>Confirm it's the wiring, not your token.</strong> The same token works on <code>GET {{baseUrl}}/api/transactions</code> (200). So the token is fine; the <code>reports</code> router just never reads it.</li>
+</ol>
+
+<div class="callout">
+  <strong>Why this is a security lesson, not just a bug.</strong> Here the forgotten middleware fails <em>closed</em> (everyone is rejected), which is annoying but safe. The exact same slip — a route mounted without its guard — fails <em>open</em> whenever the handler doesn't depend on <code>req.userId</code>. That's Broken Function Level Authorization: an endpoint reachable by people who should never reach it. The discipline is the same: <strong>no route ships without a deliberate decision about its auth.</strong>
+</div>
+
+<h2>Fix it — guard the router, consistently</h2>
+<p><code>src/routes/report.routes.ts</code> — apply <code>authenticate</code> to the whole router so no future route can be added unguarded by accident:</p>
+<pre><code>import { authenticate } from "@/middlewares/auth.middleware";
+
+const router = Router({ caseSensitive: true, strict: true });
+router.use(authenticate);                 // &larr; every route below is now protected
+
+router.get("/monthly", getMonthlyReport);
+router.get("/charts",  getChartsAndGraph);</code></pre>
+<p><code>router.use(authenticate)</code> is better than repeating it per line: it makes "protected" the default for this router, so the next person to add a route can't forget.</p>
+
+<div class="callout fix">
+  <h3>Re-test</h3>
+  <p><code>GET {{baseUrl}}/api/reports/monthly</code> with <code>{{TOKEN_A}}</code> &rarr; <code>200</code> with Alice's income/expense/savings. With no token &rarr; <code>401</code>. The feature works, and it works <em>only</em> for authenticated users.</p>
+</div>
+
+<h2>Audit the rest while you're here</h2>
+<p>Run this checklist against every router (<code>auth</code>, <code>user</code>, <code>transaction</code>, <code>ai</code>, <code>report</code>). For each route, write down: is it meant to be public? If not, is <code>authenticate</code> actually on it? Does the handler also enforce <em>object</em> ownership (Part 2)? This two-column table is exactly the kind of artifact you can show an interviewer.</p>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">You found the reports router was unguarded. Now audit the <strong>profile</strong> router yourself and decide: is it guarded or not? Prove your answer in Postman before revealing.</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <p>Open <code>src/routes/user.routes.ts</code>: both routes include the middleware — <code>routes.get('/', authenticate, getProfile)</code>. So profile <em>is</em> guarded (reports was the outlier). Prove it: <code>GET {{baseUrl}}/api/user/profile</code> with <strong>no</strong> Authorization header &rarr; <code>401</code>; with <code>Bearer {{TOKEN_A}}</code> &rarr; <code>200</code> and Alice's profile. The deliverable is the audit itself: a table of every route marked guarded / unguarded / should-be. That table is the proof to an interviewer that you review access control route by route, not by assumption.</p>
+  </details>
+</div>
+
+<div class="quiz">
+  <p class="q">A route handler reads <code>req.userId</code>, but the route was mounted without the <code>authenticate</code> middleware. What happens?</p>
+  <button data-correct="false">Express fills <code>req.userId</code> from the Bearer token automatically</button>
+  <button data-correct="true"><code>req.userId</code> is undefined, because only that middleware sets it</button>
+  <button data-correct="false">The route rejects all requests with a 500 error</button>
+  <button data-correct="false">The token is validated twice, slowing the request</button>
+  <p class="feedback"
+     data-right="Right. Express sets nothing on its own. req.userId exists only because authenticate put it there — skip the middleware and the handler is flying blind."
+     data-wrong="No — Express does not know about your tokens. req.userId is populated by the authenticate middleware and nothing else, so without it the value is undefined."></p>
+</div>
+
+<h2>Primary source</h2>
+<p><a href="https://owasp.org/API-Security/editions/2023/en/0xa5-broken-function-level-authorization/"><strong>OWASP API5:2023 — Broken Function Level Authorization</strong></a>. Guide: <code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code> ("the backend must always make the final access-control decision").</p>
+
+<div class="ask">
+  <strong>Ask me anything.</strong> Want help building the full endpoint audit table, or to see how role-based routes (admin vs user) would layer on top of this? Ask in the chat.
+</div>
+
+<nav class="lesson-nav">
+  <span>← Part 2: BOLA</span>
+  <span>Next → Part 4: brute-forcing the login</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
