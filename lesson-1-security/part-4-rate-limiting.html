@@ -15,6 +15,29 @@
   <p class="sub">You'll fire a hundred wrong passwords at the login endpoint and watch it cheerfully accept every attempt. Then you'll shut the door.</p>
 </header>
 
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> <code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code> — <em>"Authentication Best Practices"</em> (<em>"Use rate limiting, maximum retry limits, and account lockout or delay mechanisms to reduce brute-force attacks"</em>), plus the <em>"Broken Authentication"</em> part of <code>03_security_vulnerabilities.md</code> (which lists <em>"missing account lockout"</em> as a flaw).</p>
+  <div class="quiz">
+    <p class="q">1. Which measures does the guide recommend against brute-force login attacks?</p>
+    <button data-correct="false">Longer passwords only</button>
+    <button data-correct="true">Rate limiting, maximum retry limits, and account lockout/delay</button>
+    <button data-correct="false">Hiding the login page URL</button>
+    <button data-correct="false">Encrypting the username</button>
+    <p class="feedback" data-right="Correct — limit the rate and number of attempts, and lock/delay after too many." data-wrong="The guide lists rate limiting, retry limits, and lockout/delay as the defences."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. Input validation already runs on the login route. Why doesn't it stop brute force?</p>
+    <button data-correct="false">Validation only runs on GET requests</button>
+    <button data-correct="true">It checks each request's shape, not how many requests arrive over time</button>
+    <button data-correct="false">Because the password is hashed first</button>
+    <button data-correct="false">It does stop it; no limiter is needed</button>
+    <p class="feedback" data-right="Right. Validation judges one request; brute force is about volume — a rate limiter's job." data-wrong="Validation has no memory of previous requests; stopping volume needs a rate limiter."></p>
+  </div>
+  <p class="gate">Scored 2/2? Continue to the attack below. ▾</p>
+</section>
+
 <p>
   <span class="badge sev">Severity: High</span>
   <span class="badge owasp">OWASP API4:2023 — Unrestricted Resource Consumption</span>

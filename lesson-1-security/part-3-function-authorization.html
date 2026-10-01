@@ -15,6 +15,29 @@
   <p class="sub">You'll test every route from login to the end and discover that a whole group of them was wired up without the auth check. Here it fails shut — but the same mistake is how data leaks.</p>
 </header>
 
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> <code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code> — the <em>"Rendering in Frontend"</em> and <em>"Authentication Best Practices"</em> sections, especially <em>"Never trust frontend-only checks for authorization"</em> and <em>"the backend must always verify authorization before returning protected data."</em></p>
+  <div class="quiz">
+    <p class="q">1. A frontend hides the "Delete" button for non-admins. Is that sufficient security?</p>
+    <button data-correct="false">Yes, if removed from the DOM entirely</button>
+    <button data-correct="true">No — a user can still send the request directly, so the backend must verify</button>
+    <button data-correct="false">Yes, users can't click what they can't see</button>
+    <button data-correct="false">No, but only if cookies are used</button>
+    <p class="feedback" data-right="Correct. Hiding UI is not enforcement; the backend guard is what counts." data-wrong="The guide: hiding a button is not real security — the backend must verify."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. A route reads <code>req.userId</code> but was mounted without the <code>authenticate</code> middleware. What is wrong?</p>
+    <button data-correct="false">Nothing — Express fills it from the token</button>
+    <button data-correct="true">The authorization check that identifies the user never runs on that route</button>
+    <button data-correct="false">The token is validated twice</button>
+    <button data-correct="false">The route becomes public on purpose</button>
+    <p class="feedback" data-right="Right. The guard that establishes identity/permission was skipped — an inconsistent, dangerous gap." data-wrong="Without the middleware, the per-request auth check never runs; req.userId is undefined."></p>
+  </div>
+  <p class="gate">Scored 2/2? Continue to the audit below. ▾</p>
+</section>
+
 <p>
   <span class="badge sev">Severity: Medium</span>
   <span class="badge owasp">OWASP API5:2023 — Broken Function Level Authorization</span>

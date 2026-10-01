@@ -15,6 +15,29 @@
   <p class="sub">Log in as Bob and destroy Alice's financial records — using nothing but a valid Bob token. Then make that attack impossible.</p>
 </header>
 
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> <code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code> — the <em>"Server-Side User Authorization Flow"</em> section. Note the line: the server <em>"should verify both identity and permissions for every protected request,"</em> and that a logged-in user still may not be allowed to act on another user's record.</p>
+  <div class="quiz">
+    <p class="q">1. For how many requests must the server check permissions, per the guide?</p>
+    <button data-correct="false">Only the login request</button>
+    <button data-correct="false">Only the first request after login</button>
+    <button data-correct="true">Every protected request</button>
+    <button data-correct="false">Only requests that change data</button>
+    <p class="feedback" data-right="Correct — identity AND permissions on every protected request." data-wrong="The guide: verify identity and permissions for every protected request, not just login."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. A user is logged in and sends a request to delete another user's record. What should happen?</p>
+    <button data-correct="false">Allow it — they are authenticated</button>
+    <button data-correct="true">Deny it unless they have permission for that specific record</button>
+    <button data-correct="false">Allow it if the id is valid</button>
+    <button data-correct="false">Allow it but log a warning</button>
+    <p class="feedback" data-right="Right. Being logged in is not enough — permission on that object is required. That is exactly the BOLA fix." data-wrong="Authentication alone is not authorization; permission on the specific record must be checked."></p>
+  </div>
+  <p class="gate">Scored 2/2? Continue to the attack below. ▾</p>
+</section>
+
 <p>
   <span class="badge sev">Severity: High</span>
   <span class="badge owasp">OWASP API1:2023 — BOLA</span>

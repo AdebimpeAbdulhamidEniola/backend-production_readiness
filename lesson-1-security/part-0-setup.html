@@ -15,6 +15,29 @@
   <p class="sub">Before you can break anything, you need the API running and a Postman workspace that moves fast. You'll reuse this in every security part.</p>
 </header>
 
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> <code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code> — the <em>"Authentication and Authorization"</em> intro and <em>"Auth Process"</em> sections. Focus on the difference between the two, and the rule that <em>"the backend must always make the final access-control decision."</em></p>
+  <div class="quiz">
+    <p class="q">1. What is the difference between authentication and authorization?</p>
+    <button data-correct="false">They are two words for the same check</button>
+    <button data-correct="true">Authentication verifies <em>who you are</em>; authorization decides <em>what you may do</em></button>
+    <button data-correct="false">Authentication is frontend; authorization is database</button>
+    <button data-correct="false">Authentication checks email; authorization checks password</button>
+    <p class="feedback" data-right="Correct. Identity first, permissions second — two separate decisions." data-wrong="Re-read the intro: one proves identity, the other grants or denies access to a resource/action."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. Where does the guide say the final access-control decision must be made?</p>
+    <button data-correct="false">In the browser, for speed</button>
+    <button data-correct="true">On the server/backend, always</button>
+    <button data-correct="false">Wherever the token was issued</button>
+    <button data-correct="false">In the frontend router</button>
+    <p class="feedback" data-right="Right — the frontend may personalise the UI, but the backend makes the real decision." data-wrong="The guide is explicit: the backend must always make the final access-control decision."></p>
+  </div>
+  <p class="gate">Scored 2/2? Continue to the setup below. ▾</p>
+</section>
+
 <p>This part has no vulnerability — it's the foundation. By the end you'll have the server up, a database behind it, and two users (<strong>Alice</strong> and <strong>Bob</strong>) you can switch between with one click. Every later part is "log in as Bob, attack Alice."</p>
 
 <h2>1. Run the API</h2>

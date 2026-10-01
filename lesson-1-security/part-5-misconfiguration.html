@@ -15,6 +15,29 @@
   <p class="sub">The last security pass: the quiet misconfigurations that don't show up as a failed request but hand an attacker the keys — starting with the line your server prints every time it boots.</p>
 </header>
 
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> <code>Backend-Engineers-Guide/notes/08_security/07_credentials_management.md</code> — <em>"What Not To Do"</em> (hardcoding secrets, secrets in images, unprotected env vars). Also the logging rule in <code>03_security_vulnerabilities.md</code>: <em>"passwords, full tokens, credit card numbers, and private keys should never be written to logs."</em></p>
+  <div class="quiz">
+    <p class="q">1. Once a real secret has been committed to version control, how should you treat it?</p>
+    <button data-correct="false">Safe, as long as you delete the line later</button>
+    <button data-correct="true">Compromised — it still lives in history, forks, caches, and clones</button>
+    <button data-correct="false">Safe, if the repo is private</button>
+    <button data-correct="false">Safe, after a force-push</button>
+    <p class="feedback" data-right="Correct. Committed = compromised; rotate it. Deleting the line doesn't remove it from history." data-wrong="The guide: once committed, treat it as compromised — it persists in history/forks/backups."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. Why is printing the database URL / environment variables at startup dangerous?</p>
+    <button data-correct="false">It slows down boot</button>
+    <button data-correct="true">Logs are collected, searched, and retained, so the credential leaks widely</button>
+    <button data-correct="false">It stops the DB from connecting</button>
+    <button data-correct="false">It only matters with the wrong encoding</button>
+    <p class="feedback" data-right="Right. A secret in a log reaches aggregators, backups, and screenshots — treat it as leaked and rotate." data-wrong="The problem is reach: logs are centralised and retained, so printed secrets leak broadly."></p>
+  </div>
+  <p class="gate">Scored 2/2? Continue to the findings below. ▾</p>
+</section>
+
 <p>
   <span class="badge sev">Severity: Medium–High</span>
   <span class="badge owasp">OWASP API8:2023 — Security Misconfiguration</span>

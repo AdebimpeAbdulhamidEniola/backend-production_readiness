@@ -5,15 +5,18 @@ Make the Personal Finance API safe to expose to the internet. We walk the API
 Postman before fixing it. Work the parts in order — each builds on the Alice/Bob
 setup from Part 0.
 
-## Part A — Study & Check (do this first)
+## How each part works
 
-Before any Postman work, read and pass the knowledge check:
+**Every part opens with its own “Study & Check” gate** (inside the part's HTML): a specific `Backend-Engineers-Guide` reading, then 2–3 self-graded MCQs on that reading. Pass the MCQs, then do the break-and-fix practical in that same part. The fixed shape is: **study a guide section → MCQ check → break-and-fix.**
 
-1. **Read:** `Backend-Engineers-Guide/notes/08_security/01_auth.md` (authentication vs authorization — the foundation for Parts 1–3). Skim `03_security_vulnerabilities.md` and `04_security_best_practices_and_measures.md`.
-2. **Pass the MCQs** your teacher gives you on that reading (aim 4/5).
-3. Only then start Part 0 below.
-
-This is the fixed shape of every lesson: **study a guide section → MCQ check → break-and-fix practical.**
+| Part | Guide reading (study first) |
+| --- | --- |
+| Part 0 | `08_security/01_auth.md` — Authentication vs Authorization |
+| Part 1 | `08_security/01_auth.md` — JWT Best Practices |
+| Part 2 | `08_security/01_auth.md` — Server-Side Authorization Flow |
+| Part 3 | `08_security/01_auth.md` — frontend checks aren't security |
+| Part 4 | `01_auth.md` + `03_security_vulnerabilities.md` — brute force |
+| Part 5 | `07_credentials_management.md` — secrets & logging |
 
 | Part | What you break | What you learn to fix | OWASP |
 | --- | --- | --- | --- |

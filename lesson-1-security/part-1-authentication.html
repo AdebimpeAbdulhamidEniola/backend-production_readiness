@@ -15,6 +15,37 @@
   <p class="sub">You'll mint a valid session for a user whose password you never knew — by abusing a secret the code hands out for free.</p>
 </header>
 
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> <code>Backend-Engineers-Guide/notes/08_security/01_auth.md</code> — the <em>"JWT Best Practices"</em> section. It is the theory behind the <code>default_secret</code> bug you are about to exploit.</p>
+  <div class="quiz">
+    <p class="q">1. Why does a weak or predictable JWT signing secret make a system insecure?</p>
+    <button data-correct="false">Tokens expire too quickly</button>
+    <button data-correct="true">An attacker can forge valid tokens for any user</button>
+    <button data-correct="false">The server can no longer read the payload</button>
+    <button data-correct="false">Login becomes slower</button>
+    <p class="feedback" data-right="Correct — predictable secret means forgeable tokens, exactly this part's attack." data-wrong="The guide: weak/predictable secrets make tokens easier to forge."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. Where should the JWT signing key live?</p>
+    <button data-correct="false">Hard-coded in source so it is never lost</button>
+    <button data-correct="false">Inside the JWT payload</button>
+    <button data-correct="true">In environment variables, a secrets manager, or a KMS — never hard-coded</button>
+    <button data-correct="false">In the frontend config</button>
+    <p class="feedback" data-right="Right. Never hard-coded; load it from a managed secret at runtime." data-wrong="The guide says store it in env vars / secrets manager / KMS, not in source."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">3. The guide says a JWT is "signed, not automatically encrypted." What follows?</p>
+    <button data-correct="true">Anyone holding the token can read its payload, so keep secrets out of it</button>
+    <button data-correct="false">The token can never be forged</button>
+    <button data-correct="false">The payload is encrypted and safe for passwords</button>
+    <button data-correct="false">Only the server can read any part of it</button>
+    <p class="feedback" data-right="Correct. Signing proves integrity, not confidentiality — don't put sensitive data in the payload." data-wrong="Signed ≠ encrypted: the payload is readable, so never store secrets in it."></p>
+  </div>
+  <p class="gate">Scored 2/3+? Continue to the attack below. ▾</p>
+</section>
+
 <p>
   <span class="badge sev">Severity: Critical</span>
   <span class="badge owasp">OWASP API2:2023 — Broken Authentication</span>
