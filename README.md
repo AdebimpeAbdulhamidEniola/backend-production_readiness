@@ -28,7 +28,7 @@ quiz.
 | Lesson | Pillar | Status |
 | --- | --- | --- |
 | [Lesson 1](./lesson-1-security/) | **Security** — auth, authorization, abuse, misconfiguration | ✅ Complete (6 parts) |
-| [Lesson 2](./lesson-2-performance/) | **Performance** — pagination, indexing, N+1, money precision | 🧭 Outlined |
+| [Lesson 2](./lesson-2-performance/) | **Performance** — pagination, indexing, money precision, aggregation | ✅ Complete (4 parts) |
 | [Lesson 3](./lesson-3-reliability/) | **Reliability** — graceful failure, DB connection handling, idempotency | 🧭 Outlined |
 | [Lesson 4](./lesson-4-testing-and-cicd/) | **Testing & CI/CD** — turning every break/fix into an automated test + pipeline | 🧭 Outlined |
 | [Lesson 5](./lesson-5-observability/) | **Observability** — structured logging, health checks, metrics | 🧭 Outlined |

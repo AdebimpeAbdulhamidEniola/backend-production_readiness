@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 · Part 1 — The Unbounded List</title>
+<meta name="description" content="Prove that GET /transactions returns every row at once and slows down as data grows, then add pagination.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 2 · Performance · Part 1</p>
+  <h1>The list that returns everything</h1>
+  <p class="sub">Your transactions endpoint hands back every row a user has ever created — in one response. Fine with 3 rows; a problem with 50,000. You'll prove it, then page it.</p>
+</header>
+
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> <code>Backend-Engineers-Guide/notes/04_databases/03_indexes.md</code> — the <em>"Concepts and Purpose"</em> section. Focus on why scanning and returning huge numbers of rows is expensive, and that cost grows with table size.</p>
+  <div class="quiz">
+    <p class="q">1. Returning <em>all</em> of a user's rows in one response is fine in dev but risky in production because…</p>
+    <button data-correct="false">JSON can't hold more than 100 items</button>
+    <button data-correct="true">response time and memory grow with the data, so it gets slower and heavier over time</button>
+    <button data-correct="false">the database refuses large results</button>
+    <button data-correct="false">Express blocks responses above 1 MB</button>
+    <p class="feedback" data-right="Right — it works at 3 rows and quietly degrades at 50,000. Cost scales with data." data-wrong="The issue is scale: more rows → bigger, slower responses and more memory, until it hurts."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. What's the standard fix for an endpoint that could return very many rows?</p>
+    <button data-correct="true">Pagination — return a bounded page at a time (limit + offset/cursor)</button>
+    <button data-correct="false">Compress the JSON</button>
+    <button data-correct="false">Move the endpoint to a faster server</button>
+    <button data-correct="false">Cache the whole table in memory</button>
+    <p class="feedback" data-right="Correct — bound the result size with a page limit, and let the client ask for more." data-wrong="The fix is to bound how much you return per request: pagination."></p>
+  </div>
+  <p class="gate">Scored 2/2? Continue to the practical below. ▾</p>
+</section>
+
+<p>
+  <span class="badge sev">Impact: Scales badly</span>
+</p>
+
+<h2>Where the issue is</h2>
+<p><code>src/models/transaction.model.ts</code> — the list has no limit:</p>
+<pre><code>export const getTransactionsByUser = async (userId: string) =&gt; {
+  return await prisma.transaction.findMany({ where: { userId } });  // &larr; every row, always
+};</code></pre>
+<p>The controller even admits it: <code>// I would still implement Pagination in this controller</code>. Let's do that.</p>
+
+<div class="callout break">
+  <h3>The claim we're about to prove</h3>
+  <p>As a user accumulates transactions, <code>GET /api/transactions</code> returns <strong>all</strong> of them in one response, and the response gets steadily slower and larger — unbounded.</p>
+</div>
+
+<h2>Break it — feel the growth</h2>
+<ol class="steps">
+  <li><strong>Seed a lot of rows</strong> for Alice. In a terminal (adjust the connection as needed), or add a quick loop to <code>prisma/seed.ts</code>:
+    <pre><code>// seed 5,000 transactions for one user, then run: npx tsx prisma/seed.ts
+for (let i = 0; i &lt; 5000; i++) {
+  await prisma.transaction.create({ data: {
+    amount: Math.random()*100, category: "Test", type: "EXPENSE", userId: ALICE_ID,
+  }});
+}</code></pre>
+  </li>
+  <li><strong>Call the endpoint</strong> as Alice: <code>GET {{baseUrl}}/api/transactions</code>. Watch two numbers in your server log:
+    <div class="callout break" style="margin:.8rem 0 0">The response time climbs (tens → hundreds of ms) and the payload size balloons to megabytes. Now imagine 500,000 rows, or every user hitting it at once. The endpoint has no ceiling — that's the bug.</div>
+  </li>
+</ol>
+
+<h2>Fix it — paginate</h2>
+<p>Return a bounded page, and let the client ask for the next one.</p>
+<h3>1. Accept page params and cap them</h3>
+<p>Controller (<code>getTransactionController</code>): read <code>page</code> and <code>limit</code> from the query, with safe defaults and a hard maximum:</p>
+<pre><code>const page  = Math.max(1, Number(req.query.page) || 1);
+const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20)); // cap at 100
+const skip  = (page - 1) * limit;
+const result = await getTransactionsByUser(userId, skip, limit);</code></pre>
+<h3>2. Bound the query</h3>
+<pre><code>export const getTransactionsByUser = async (userId: string, skip: number, take: number) =&gt; {
+  const [items, total] = await Promise.all([
+    prisma.transaction.findMany({ where: { userId }, skip, take, orderBy: { createdAt: "desc" } }),
+    prisma.transaction.count({ where: { userId } }),
+  ]);
+  return { items, total };
+};</code></pre>
+<p>Return <code>{ items, total, page, limit }</code> so the client knows how to ask for the next page.</p>
+
+<div class="callout fix">
+  <h3>Re-test</h3>
+  <p><code>GET {{baseUrl}}/api/transactions?page=1&amp;limit=20</code> → fast, small, 20 rows no matter how many exist. <code>?page=2</code> → the next 20. The endpoint now has a ceiling: response size and time stay flat as data grows.</p>
+</div>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">A client sends <code>?limit=100000</code> to pull everything in one shot. Does your fix stop them? Prove it, and explain why the cap matters.</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <p>Call <code>GET {{baseUrl}}/api/transactions?limit=100000</code>. Because of <code>Math.min(100, ...)</code>, the server clamps it to <strong>100</strong> — you still get at most 100 rows. Without that cap, a client (or attacker) could set a huge limit and reintroduce the exact unbounded-response problem on demand — turning a performance control into a denial-of-service lever (ties back to Lesson 1 Part 4). Always cap <code>limit</code> server-side; never trust the client's number.</p>
+  </details>
+</div>
+
+<h2>Primary source</h2>
+<p><code>Backend-Engineers-Guide/notes/04_databases/03_indexes.md</code> (why large scans are costly) and the <a href="https://www.prisma.io/docs/orm/prisma-client/queries/pagination">Prisma pagination docs</a> (offset vs cursor).</p>
+
+<div class="ask">
+  <strong>Ask me anything.</strong> Want the difference between offset and cursor pagination (and why cursor is better for huge tables), or how to return pagination metadata cleanly? Ask in the chat.
+</div>
+
+<nav class="lesson-nav">
+  <span>Lesson 2 · Performance</span>
+  <span>Next → Part 2: the missing index</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

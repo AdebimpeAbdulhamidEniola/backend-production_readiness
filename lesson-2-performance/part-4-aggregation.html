@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 · Part 4 — Make the Database Do the Work</title>
+<meta name="description" content="The monthly report pulls all rows into Node and sums them in JavaScript. Push the aggregation into the database instead.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 2 · Performance · Part 4</p>
+  <h1>Doing in Node what the database does better</h1>
+  <p class="sub">Your monthly report downloads every transaction into your server's memory and adds them up in JavaScript. The database can do that sum far faster, before the data ever leaves it. You'll prove the waste, then push the work down.</p>
+</header>
+
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> <code>Backend-Engineers-Guide/notes/04_databases/03_indexes.md</code> again (indexes make aggregation fast) plus the idea of <em>pushing work to the database</em>: databases are built to filter, group, and sum huge sets efficiently; dragging all rows into your app to loop over them wastes memory and network.</p>
+  <div class="quiz">
+    <p class="q">1. The report fetches all of a user's rows, then sums <code>amount</code> with a JS <code>reduce</code>. Why is that wasteful?</p>
+    <button data-correct="true">It transfers every row into Node's memory just to produce a few numbers the DB could compute</button>
+    <button data-correct="false">reduce is a slow JavaScript function</button>
+    <button data-correct="false">JSON can't represent sums</button>
+    <button data-correct="false">It uses too many indexes</button>
+    <p class="feedback" data-right="Right — you move thousands of rows over the wire to get 3 totals. Let the DB compute and return just the totals." data-wrong="The waste is moving all rows into app memory to compute something the database can return directly."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. The better approach is to…</p>
+    <button data-correct="true">Ask the database to aggregate (SUM/GROUP BY) and return only the totals</button>
+    <button data-correct="false">Fetch rows in smaller batches but still sum in Node</button>
+    <button data-correct="false">Cache the rows in a global variable</button>
+    <button data-correct="false">Add more RAM to the server</button>
+    <p class="feedback" data-right="Correct — compute where the data lives; return small results. That's what SUM/GROUP BY are for." data-wrong="Push the computation into the database with aggregation; return just the numbers you need."></p>
+  </div>
+  <p class="gate">Scored 2/2? Continue to the practical below. ▾</p>
+</section>
+
+<p><span class="badge sev">Impact: Wasteful at scale</span></p>
+
+<h2>Where the issue is</h2>
+<p><code>src/controllers/report.controller.ts</code> — it pulls every transaction into Node, then filters and sums in JavaScript:</p>
+<pre><code>const transactions = await getTransactionsByUser(userId);   // ALL rows into memory
+const monthly = transactions.filter(/* this month */);
+const totalIncome   = monthly.filter(t =&gt; t.type==="INCOME").reduce((s,t)=&gt;s+t.amount,0);
+const totalExpenses = monthly.filter(t =&gt; t.type==="EXPENSE").reduce((s,t)=&gt;s+t.amount,0);</code></pre>
+<p>To produce <strong>two numbers</strong>, it downloads <strong>every row</strong>. (The category report in <code>report.model.ts</code> already does it the right way with <code>groupBy</code> — compare them.)</p>
+
+<div class="callout break">
+  <h3>The claim we're about to prove</h3>
+  <p>The monthly report's cost grows with the user's total number of transactions, even though the answer is just a few totals — because it moves all rows into Node to add them up.</p>
+</div>
+
+<h2>Break it — see the waste</h2>
+<ol class="steps">
+  <li>With Alice's ~5,000 seeded rows, call <code>GET {{baseUrl}}/api/reports/monthly</code> and note the time in your server log.</li>
+  <li>Seed 20,000 more and call it again.
+    <div class="callout break" style="margin:.8rem 0 0">The time climbs with the row count — because every call drags all those rows across the connection into Node just to compute 3 numbers. The work scales with data it shouldn't need to.</div>
+  </li>
+</ol>
+
+<h2>Fix it — aggregate in the database</h2>
+<p>Ask Postgres (via Prisma) to compute the sums and return only the totals.</p>
+<pre><code>// report.model.ts
+export const getMonthlySummary = async (userId: string, start: Date, end: Date) =&gt; {
+  const grouped = await prisma.transaction.groupBy({
+    by: ["type"],
+    where: { userId, createdAt: { gte: start, lt: end } },
+    _sum: { amountMinor: true },          // DB does the sum
+  });
+  // grouped → [{ type: "INCOME", _sum: { amountMinor: 40000 } }, ...]
+  return grouped;
+};</code></pre>
+<p>The controller then just reads the two numbers out of <code>grouped</code> and computes savings. Only a handful of rows ever cross the wire, and the <code>[userId, createdAt]</code> index from Part 2 makes the filter fast.</p>
+
+<div class="callout fix">
+  <h3>Re-test</h3>
+  <p><code>GET {{baseUrl}}/api/reports/monthly</code> stays fast whether the user has 50 or 50,000 transactions — because the database returns only the totals, not the rows. Cost now scales with the <em>answer</em>, not the <em>data</em>.</p>
+</div>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">The category report (<code>getCategoryWiseSpending</code>) already uses <code>groupBy</code>. Open it and explain, in one line, why it was already "correct" by this lesson's standard — and what it returns instead of raw rows.</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <p>It uses <code>prisma.transaction.groupBy({ by: ['category'], _sum: { amount: true }, where: {...} })</code> — so the <strong>database</strong> groups by category and sums each group, returning just one row per category (category + total), not the raw transactions. That's the same "push the work down, return small results" principle this part applies to the monthly report. Your previous self got the category report right and the monthly report wrong — fixing the monthly one makes them consistent.</p>
+  </details>
+</div>
+
+<h2>Primary source</h2>
+<p><code>Backend-Engineers-Guide/notes/04_databases/03_indexes.md</code> and the <a href="https://www.prisma.io/docs/orm/prisma-client/queries/aggregation-grouping-summarizing">Prisma aggregation &amp; groupBy docs</a>.</p>
+
+<div class="ask">
+  <strong>Ask me anything — and that's Lesson 2.</strong> You can now paginate, index, store money correctly, and aggregate in the database. Ask for the interview summary of all four, or say "next lesson" for Reliability.
+</div>
+
+<nav class="lesson-nav">
+  <span>← Part 3: Money precision</span>
+  <span>Lesson 2 complete → Lesson 3: Reliability</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

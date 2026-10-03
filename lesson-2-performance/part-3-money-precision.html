@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 · Part 3 — The Money Rounding Bug</title>
+<meta name="description" content="Prove that storing money as a float causes rounding errors, then switch to integer minor units or Decimal.">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<header class="lesson-head">
+  <p class="kicker">Lesson 2 · Performance · Part 3</p>
+  <h1>When ₦0.10 + ₦0.20 isn't ₦0.30</h1>
+  <p class="sub">Your amounts are stored as floating-point numbers. For a finance app, that's a correctness bug waiting to happen. You'll make the computer get money wrong, then fix how it's stored.</p>
+</header>
+
+<section class="study">
+  <p class="kicker">Study &amp; Check — do this before the practical</p>
+  <h2>📖 Read first</h2>
+  <p class="read"><strong>Read:</strong> this is a correctness topic the guide doesn't cover directly, so the source is the language itself — run the "break it" step below first, then read MDN on <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number">Number</a> (floating point). Core idea: computers store decimals in binary, and most decimal fractions (like 0.1) can't be represented exactly — so arithmetic drifts by tiny amounts.</p>
+  <div class="quiz">
+    <p class="q">1. Why can a float store <code>0.1 + 0.2</code> as <code>0.30000000000000004</code>?</p>
+    <button data-correct="false">JavaScript has a bug</button>
+    <button data-correct="true">0.1 and 0.2 have no exact binary representation, so the result is approximate</button>
+    <button data-correct="false">The numbers are too large</button>
+    <button data-correct="false">It only happens in Postgres</button>
+    <p class="feedback" data-right="Right — binary floating point can't represent most decimal fractions exactly, so results drift." data-wrong="It's not a bug — it's how binary floating point works; decimal fractions like 0.1 aren't exact."></p>
+  </div>
+  <div class="quiz">
+    <p class="q">2. What's the safe way to store money?</p>
+    <button data-correct="true">Integer minor units (e.g. cents/kobo) — or a fixed-precision Decimal type</button>
+    <button data-correct="false">Always round floats to 2 places before saving</button>
+    <button data-correct="false">Store money as text</button>
+    <button data-correct="false">Use a bigger float</button>
+    <p class="feedback" data-right="Correct — integers (₦1.00 = 100) or Decimal avoid drift entirely; rounding floats only hides it." data-wrong="Store integer minor units or Decimal. Rounding a float still accumulates error over many operations."></p>
+  </div>
+  <p class="gate">Scored 2/2? Continue to the practical below. ▾</p>
+</section>
+
+<p><span class="badge sev">Impact: Correctness (money!)</span></p>
+
+<h2>Where the issue is</h2>
+<p><code>prisma/schema.prisma</code> stores amounts as <code>Float</code>:</p>
+<pre><code>model Transaction { amount Float }         // &larr; floating point
+model User { monthlyIncome Float?  savingsGoal Float? }</code></pre>
+<p>And the report sums them in JavaScript: <code>reduce((total, t) =&gt; total + t.amount, 0)</code>. Floats + many additions = drifting totals.</p>
+
+<div class="callout break">
+  <h3>The claim we're about to prove</h3>
+  <p>Adding many float amounts produces a total that is slightly <strong>wrong</strong> — off by fractions of a unit. In money, "slightly wrong, repeatedly" is a serious bug.</p>
+</div>
+
+<h2>Break it — watch the math drift</h2>
+<ol class="steps">
+  <li><strong>The one-liner everyone should see.</strong> In a Node REPL (<code>node</code>) or your browser console:
+    <pre><code>0.1 + 0.2            // → 0.30000000000000004
+0.1 + 0.2 === 0.3    // → false</code></pre>
+  </li>
+  <li><strong>Make your API do it.</strong> As Alice, create three transactions: <code>0.1</code>, <code>0.2</code>, <code>0.1</code> (all INCOME). Then call <code>GET {{baseUrl}}/api/reports/monthly</code>.
+    <div class="callout break" style="margin:.8rem 0 0">The <code>totalIncome</code> can come back as <code>0.4000000000000001</code> instead of <code>0.4</code>. Scale that across thousands of transactions and real balances stop matching. A finance API that can't add money correctly is broken, no matter how fast it is.</div>
+  </li>
+</ol>
+
+<h2>Fix it — store money as whole numbers</h2>
+<p>The professional default: store money as <strong>integer minor units</strong> — kobo (₦) or cents ($). ₦1.00 becomes <code>100</code>. Integers add exactly; no drift ever.</p>
+<h3>1. Change the schema</h3>
+<pre><code>model Transaction {
+  amountMinor Int      // e.g. 100 = ₦1.00 ; always exact
+}
+model User {
+  monthlyIncomeMinor Int?
+  savingsGoalMinor   Int?
+}</code></pre>
+<h3>2. Convert at the edges only</h3>
+<pre><code>// incoming: ₦ from client → minor units for storage
+const amountMinor = Math.round(amountNaira * 100);
+// outgoing: minor units → ₦ for display
+const naira = amountMinor / 100;</code></pre>
+<p>All math (sums, reports) happens on the integers; you only divide by 100 at the very end for display. The database never holds a fraction.</p>
+<h3>Alternative</h3>
+<p>If you'd rather keep decimals, use Prisma's <code>Decimal</code> type (fixed precision) instead of <code>Float</code>, and do arithmetic with a decimal library. Integer minor units is simpler and the more common choice for transactional money.</p>
+
+<div class="callout fix">
+  <h3>Re-test</h3>
+  <p>Store <code>0.1, 0.2, 0.1</code> as <code>10, 20, 10</code> (minor units). The report sums them to <code>40</code> exactly, and you display <code>₦0.40</code>. No drift, ever — because you never added floats.</p>
+</div>
+
+<div class="challenge">
+  <h3>Your turn</h3>
+  <p class="goal">Changing <code>Float</code> to <code>Int</code> is a breaking schema change — existing rows hold values like <code>5000.0</code>. What has to happen to that old data, and why can't you just change the column type?</p>
+  <details>
+    <summary>Reveal the answer</summary>
+    <p>You need a <strong>data migration</strong>: a script/SQL step that multiplies every existing <code>amount</code> by 100 and writes it into the new integer column, before (or as part of) dropping the old one. Just switching the type would misread <code>5000.0</code> as <code>5000</code> minor units (= ₦50.00) instead of ₦5000.00 — off by 100×. Real production changes like this ship as: add new column → backfill (multiply) → switch reads/writes → remove old column. This is exactly the kind of careful, reversible migration Lesson 3 (Reliability) and Lesson 4 (CI/CD) make safe.</p>
+  </details>
+</div>
+
+<h2>Primary source</h2>
+<p>MDN — <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number">Number &amp; floating point</a>; <a href="https://www.prisma.io/docs/orm/reference/prisma-schema-reference#decimal">Prisma <code>Decimal</code></a>. (The Backend-Engineers-Guide doesn't cover money precision — a gap worth knowing you had to look outside for.)</p>
+
+<div class="ask">
+  <strong>Ask me anything.</strong> Want the integer-minor-units vs Decimal trade-off, or how currencies with different decimal places (e.g. JPY has 0) change this? Ask in the chat.
+</div>
+
+<nav class="lesson-nav">
+  <span>← Part 2: Indexes</span>
+  <span>Next → Part 4: making the database do the work</span>
+</nav>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
